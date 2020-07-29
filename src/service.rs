@@ -125,6 +125,24 @@ where
     pub fn stop(&mut self) {
         self.frugalos_segment_service.stop();
     }
+    /// Returns whether device was found or not.
+    pub fn stop_device(&mut self, device_seqno: u32) -> bool {
+        if let Some(local_device) = self.local_devices.get_mut(&device_seqno) {
+            info!(
+                self.logger,
+                "Stopping device";
+                "device_seqno" => device_seqno,
+            );
+            local_device.stop();
+            return true;
+        }
+        info!(
+            self.logger,
+            "Device not found";
+            "device_seqno" => device_seqno,
+        );
+        false
+    }
     pub fn take_snapshot(&mut self) {
         self.frugalos_segment_service.take_snapshot();
     }
@@ -498,6 +516,11 @@ impl LocalDevice {
             let (tx, rx) = oneshot::monitor();
             self.watches.push(tx);
             WatchDeviceHandle::Wait(rx)
+        }
+    }
+    fn stop(&mut self) {
+        if let Some(handle) = self.handle.as_mut() {
+            handle.request().deadline(Deadline::Immediate).stop();
         }
     }
 }

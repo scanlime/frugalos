@@ -111,7 +111,9 @@ impl FrugalosDaemon {
         let client = service.client();
         RpcServer::register(
             client.clone(),
-            FrugalosDaemonHandle { command_tx },
+            FrugalosDaemonHandle {
+                command_tx: command_tx.clone(),
+            },
             &mut rpc_server_builder,
             tracer.clone(),
         );
@@ -132,7 +134,11 @@ impl FrugalosDaemon {
             ))
         )?;
 
-        let config_server = ConfigServer::new(rpc_service.handle(), rpc_addr);
+        let config_server = ConfigServer::new(
+            rpc_service.handle(),
+            rpc_addr,
+            FrugalosDaemonHandle { command_tx },
+        );
         track!(config_server.register(&mut http_server_builder))?;
 
         Ok(FrugalosDaemon {
@@ -214,6 +220,13 @@ impl DaemonRunner {
             DaemonCommand::TruncateBucket { bucket_seqno } => {
                 self.service.truncate_bucket(bucket_seqno);
             }
+            DaemonCommand::StopDevice {
+                device_seqno,
+                reply,
+            } => {
+                let result = self.service.stop_device(device_seqno);
+                reply.exit(Ok(result))
+            }
         }
     }
 }
@@ -264,6 +277,17 @@ impl FrugalosDaemonHandle {
         let command = DaemonCommand::TruncateBucket { bucket_seqno };
         let _ = self.command_tx.send(command);
     }
+
+    /// デバイスの停止を要求する
+    pub fn stop_device(&self, device_seqno: u32) -> impl Future<Item = bool, Error = Error> {
+        let (reply_tx, reply_rx) = oneshot::monitor();
+        let command = DaemonCommand::StopDevice {
+            device_seqno,
+            reply: reply_tx,
+        };
+        let _ = self.command_tx.send(command);
+        StopDevice(reply_rx)
+    }
 }
 
 #[derive(Debug)]
@@ -275,12 +299,32 @@ enum DaemonCommand {
     TruncateBucket {
         bucket_seqno: u32,
     },
+    StopDevice {
+        device_seqno: u32,
+        reply: oneshot::Monitored<bool, Error>,
+    },
 }
 
 #[derive(Debug)]
 pub(crate) struct StopDaemon(oneshot::Monitor<(), Error>);
 impl Future for StopDaemon {
     type Item = ();
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        track!(self
+            .0
+            .poll()
+            .map_err(|e| e.unwrap_or_else(|| ErrorKind::Other
+                .cause("Monitoring channel disconnected")
+                .into())))
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct StopDevice(oneshot::Monitor<bool, Error>);
+impl Future for StopDevice {
+    type Item = bool;
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
