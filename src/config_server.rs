@@ -213,7 +213,7 @@ struct DeviceState {
     state: RunningState,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(rename_all = "lowercase")]
 enum RunningState {
     Started,
@@ -227,7 +227,6 @@ impl HandleRequest for PutDeviceState {
 
     type ReqBody = DeviceState;
     type ResBody = HttpResult<DeviceState>;
-    // type ResBody = HttpResult<()>;
     type Decoder = BodyDecoder<JsonDecoder<Self::ReqBody>>;
     type Encoder = BodyEncoder<JsonEncoder<Self::ResBody>>;
     type Reply = Reply<Self::ResBody>;
@@ -247,9 +246,12 @@ impl HandleRequest for PutDeviceState {
                 };
                 futures::future::ok((status, body))
             })
-            .and_then(move |(status, body)| match body {
-                Err(e) => Either::A(futures::future::ok((status, Err(e)))),
-                Ok(device) => {
+            .and_then(move |(status, body)| match (body, device_state.state) {
+                (Err(e), _) => Either::A(futures::future::ok((status, Err(e)))),
+                (Ok(_device), RunningState::Started) => {
+                    Either::A(futures::future::ok((status, Ok(device_state))))
+                }
+                (Ok(device), RunningState::Stopped) => {
                     let device_seqno = device.seqno();
                     let future = daemon_handle.stop_device(device_seqno).map(move |result| {
                         if result {
