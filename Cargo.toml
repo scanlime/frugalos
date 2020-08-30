@@ -57,5 +57,8 @@ tempdir = "0.3"
 [build-dependencies]
 trackable = "^0.2.21"
 
+[patch.crates-io]
+liberasurecode = { path = "../liberasurecode" }
+
 [workspace]
 members = ["frugalos_core", "frugalos_config", "frugalos_mds", "frugalos_raft", "frugalos_segment"]
